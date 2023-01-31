@@ -1,0 +1,298 @@
+#include "DxLib.h"
+#include "main.h"
+#include"Scene.h"
+#include "Actor.h"
+#include <stdlib.h>
+#include "SpriteComponent.h"
+
+int SizeX = 1000; int SizeY = 800;		// ウインドウのサイズ
+int borderY = 70;		//情報表示領域のy座標
+
+int Whandle = 0;		//Whiteballファイルハンドル
+int Yhandle = 0;		//Yhiteballファイルハンドル
+int Rhandle = 0;		//Rhiteballファイルハンドル
+int count = 0;			//消失数カウンタ
+
+// コンストラクタ
+main::main()
+{
+	PlayTime = 60;	//プレイ時間
+	
+	mTicksCount = 0;	//whileループの一回分の時間を計算するための変数
+	deltatime = 0.f;
+
+	count2 = 0.f;
+	TitleCount = 0;
+	time = 0.f;		//ゲームスタートからの時間を保持する変数
+
+
+	
+
+	mUpdatingActors = false;
+}
+
+// 初期化メソッド
+bool main::Initialize()
+{
+	if (DxLib_Init() == -1)// ＤＸライブラリ初期化処理
+	{
+		return false;		// エラーが起きたら直ちに終了
+	}
+	SetGraphMode(SizeX, SizeY, 32);// 画面の大きさをSizeX × SizeY に設定する
+	ChangeWindowMode(TRUE);// ウインドウモード
+
+	mTicksCount = GetNowCount();
+
+	return true;
+}
+
+//ゲーム時間とボールの消失した数を表示する関数
+void main::DisplayTime() {
+
+	time = GetNowCount() - mTicksCount;		//ゲームスタートからの時間
+	int dis = PlayTime * 1000 - time;		//残り時間の計算
+	DrawBox(1, SizeY - borderY + 1, SizeX, SizeY, GetColor(0, 255, 0), 1);		//表示領域を黒でクリアする
+	DrawFormatString(SizeX + 200, SizeY - borderY + 2, GetColor(255, 255, 255), "Time=%d", dis / 1000);
+	DrawFormatString(SizeX + 50, SizeY - borderY + 2, GetColor(255, 255, 255), "Count=%d", count);
+	/*if (t / 1000 == 20) {
+		LowTime = true;
+	}*/
+}
+
+// ゲームシーンにActorを追加するメソッド定義
+void main::AddActor(Actor* actor)
+{
+	// If we're updating actors, need to add to pending
+	if (mUpdatingActors)// Actorを登録するタイミングが来ているかどうか
+	{
+		mPendingActors.emplace_back(actor);// 次回登録リストに追加
+	}
+	else
+	{
+		mActors.emplace_back(actor);// シーンに登録
+	}
+}
+
+// ゲームシーンにあるActorを削除するメソッド定義
+void main::RemoveActor(Actor* actor)
+{
+	// 待機リストにあるかどうかを検索して見つかれば消去
+	auto iter = std::find(mPendingActors.begin(), mPendingActors.end(), actor);
+	if (iter != mPendingActors.end())
+	{
+		// Swap to end of vector and pop off (avoid erase copies)
+		std::iter_swap(iter, mPendingActors.end() - 1);
+		mPendingActors.pop_back();
+	}
+
+	// シーンにある場合に見つかれば消去
+	iter = std::find(mActors.begin(), mActors.end(), actor);
+	if (iter != mActors.end())
+	{
+		// Swap to end of vector and pop off (avoid erase copies)
+		std::iter_swap(iter, mActors.end() - 1);
+		mActors.pop_back();
+	}
+}
+
+// ゲームの更新メソッドの定義
+void main::UpdateGame()
+{
+	WaitTimer(16);// 待機時間(16ms）設定
+	float deltaTime = (GetNowCount() - mTicksCount) / 1000.0f;// １ループ時間の計算
+	if (deltaTime > 0.05f)
+	{
+		deltaTime = 0.05f;
+	}
+	mTicksCount = GetNowCount();
+
+	// Update all actors(シーンに登場するオブジェクト(Actorクラスを継承)を更新
+	mUpdatingActors = true;
+	for (auto actor : mActors)
+	{
+		actor->Update(deltaTime);
+	}
+
+	// Move any pending actors to mActors（シーンに登場するオブジェクトを追加する場合のループ)
+	for (auto pending : mPendingActors)
+	{
+		mActors.emplace_back(pending);// vector型配列の更新メソッド
+	}
+	mPendingActors.clear();// vector型配列をクリア(全消去)メソッド
+
+	// Add any dead actors to a temp vector
+	std::vector<Actor*> deadActors;// vector型配列(Actorクラスのポインターをためる配列)
+	for (auto actor : mActors)
+	{
+		if (actor->GetState() == Actor::EDead)// Actorクラスのオブジェクトの状態がEDeadの場合
+		{
+			deadActors.emplace_back(actor);// vector型配列の更新メソッド
+		}
+	}
+	// Delete dead actors (which removes them from mActors)
+	// Actorクラスのオブジェクトの状態EDeadのすべてを消去
+	for (auto actor : deadActors)
+	{
+		delete actor;//要素すべてを消去(ｖector型配列内を消去)
+	}
+
+}
+
+// 描画処理
+void main::DrawImage()
+{
+	Whandle = LoadGraph("image/Whiteball2.png");
+	if (Whandle == -1) {
+		DxLib_End();
+	}
+	Rhandle = LoadGraph("image/Redball2.png");
+	if (Rhandle == -1) {
+		DxLib_End();
+	}
+	Yhandle = LoadGraph("image/Yellowball2.png");
+	if (Yhandle == -1) {
+		DxLib_End();
+	}
+}
+
+// レッドボールの生成メソッドの定義
+void main::AddrBall(rBall* other)
+{
+	mrBall.emplace_back(other);
+}
+
+// レッドボールの消去メソッドの定義
+void main::RemoverBall(rBall* other)
+{
+	auto iter = std::find(mrBall.begin(),
+		mrBall.end(), other);
+	if (iter != mrBall.end())
+	{
+		mrBall.erase(iter);
+	}
+}
+
+// イエローボールの生成メソッドの定義
+void main::AddyBall(yBall* other)
+{
+	myBall.emplace_back(other);
+}
+
+// イエローボールの消去メソッドの定義
+void main::RemoveyBall(yBall* other)
+{
+	auto iter = std::find(myBall.begin(),
+		myBall.end(), other);
+	if (iter != myBall.end())
+	{
+		myBall.erase(iter);
+	}
+}
+
+// ゲーム終了時の画像データの消去メソッド
+void main::UnloadData()
+{
+	while (!mActors.empty())			// ゲームに登録されているActorが全て消去するまでループを続ける
+	{
+		delete mActors.back();			// ゲームに登録されているActorの最後を見つけて消去する
+	}
+}
+
+// シーンの全体を描画するメソッド
+void main::GenerateOutput()
+{
+	//ClearDrawScreen();// 画面クリア
+	//DrawBox(0, 0, SizeX, SizeY, GetColor(0, 0, 0), 1);// Box画面クリア
+
+	// Draw all sprite components　すべてのスプライトについて描画順を考慮して描く
+	for (auto sprite : mSprites)
+	{
+		sprite->Draw();// 背景を含めて画像を描画するメソッド
+	}
+
+}
+
+// スプライトを追加するメソッド
+void main::AddSprite(SpriteComponent* sprite)
+{
+	int myDrawOrder = sprite->GetDrawOrder();
+	auto iter = mSprites.begin();
+	for (;
+		iter != mSprites.end();
+		++iter)
+	{
+		if (myDrawOrder < (*iter)->GetDrawOrder())		// スプライトの描画順を決める
+		{
+			break;
+		}
+	}
+	// Inserts element before position of iterator
+	mSprites.insert(iter, sprite);
+}
+
+//スプライトの消去メソッドの定義
+void main::RemoveSprite(SpriteComponent* sprite)
+{
+	// スプライトを探す
+	auto iter = std::find(mSprites.begin(), mSprites.end(), sprite);
+	mSprites.erase(iter);		// スプライトの消去
+}
+
+// 画像データを実際に読み込んでそのハンドル(整数)を返すメソッド
+int main::GetTexture(const std::string& fileName)
+{
+	int tex = -1;
+	// Is the texture already in the map?
+	auto iter = mTextures.find(fileName);
+	if (iter != mTextures.end())
+	{
+		tex = iter->second;
+	}
+	else
+	{
+		// Load from file
+		tex = LoadGraph(fileName.c_str());// Dxlibの関数(画像のハンドルを返す)
+		if (tex == -1)
+		{
+			std::cout << "Failed to load texture file " << fileName << "\n";
+			return -1;
+		}
+		mTextures.emplace(fileName.c_str(), tex);// map型配列を更新(配列に２つの値をセットで登録)
+	}
+	return tex;// handleを返す
+}
+
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+
+	main main;
+	Scene scene(&main);
+	if (main.Initialize())
+	{
+		ClearDrawScreen();
+		main.DrawImage();
+
+		scene.InitializationMaus();
+		//文字列表示初期設定
+		SetFontSize(30);				//文字の大きさ
+		ChangeFont("Impact");			//文字のフォント
+		ChangeFontType(DX_FONTTYPE_ANTIALIASING);	//文字表示設定
+
+		// ゲームメインループ
+		while (!ProcessMessage()) {
+			if (CheckHitKey(KEY_INPUT_ESCAPE)) { break; }
+			scene.SceneMove(&main);
+		}
+	}
+	ClearDrawScreen();
+
+	unsigned int Cr;
+	Cr = GetColor(255, 255, 255);	//白を設定
+	DrawString(250, 240 - 32, "Thank you for Playing", Cr);
+	WaitKey();          //キーの入力待ち
+	main.UnloadData();	// 画像削除関数
+	DxLib_End();        // ＤＸライブラリ使用の終了処理
+
+	return 0;        // ソフト
+}
